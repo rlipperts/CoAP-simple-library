@@ -211,12 +211,14 @@ int Coap::parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf
     return 0;
 }
 
+// receiving loop that parses packets from udp component. Blocks until packet received.
 bool Coap::loop() {
 
     uint8_t buffer[BUF_MAX_SIZE];
     int32_t packetlen = _udp->parsePacket();
 
     while (packetlen > 0) {
+
         packetlen = _udp->read(buffer, packetlen >= BUF_MAX_SIZE ? BUF_MAX_SIZE : packetlen);
 
         CoapPacket packet;
@@ -265,6 +267,7 @@ bool Coap::loop() {
 
         if (packet.type == COAP_ACK) {
             // call response function
+            // Todo: Here we need to remove the packet waiting for ACK
             resp(packet, _udp->remoteIP(), _udp->remotePort());
 
         } else {
@@ -290,7 +293,7 @@ bool Coap::loop() {
             }
         }
 
-        /* this type check did not use.
+        /* this type check did not use. BECAUSE THIS IS ONLY A CLIENT
         if (packet.type == COAP_CON) {
             // send response 
              sendResponse(_udp->remoteIP(), _udp->remotePort(), packet.messageid);

@@ -24,6 +24,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define __SIMPLE_COAP_H__
 
 #include "Udp.h"
+#include <cstdint>
+
 #define MAX_CALLBACK 10
 
 #define COAP_HEADER_SIZE 4

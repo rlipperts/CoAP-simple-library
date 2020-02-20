@@ -45,7 +45,7 @@ void callback_light(CoapPacket &packet, IPAddress ip, int port) {
 
 // CoAP client response callback
 void callback_response(CoapPacket &packet, IPAddress ip, int port) {
-  Serial.println("[Coap Response got]");
+  Serial.println("[Coap ACK Response got]");
   
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
