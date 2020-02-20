@@ -7,23 +7,17 @@
 
 #include "coap-simple.h"
 
-////todo create wrapper class that looks the same to the outside but manages retransmitting for messages sent from client
-
 class CoapR {
 private:
+
+    Coap coap;
     UDP *_udp;
     CoapUri uri;
     callback resp;
     int _port;
 
-    uint16_t sendPacket(CoapPacket &packet, IPAddress ip);
-    uint16_t sendPacket(CoapPacket &packet, IPAddress ip, int port);
-    int parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf, size_t buflen);
-
 public:
-    CoapR(
-            UDP& udp
-    );
+    CoapR(UDP &udp);
     bool start();
     bool start(int port);
     void response(callback c) { resp = c; }
