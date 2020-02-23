@@ -5,7 +5,6 @@ project(coap_retransmit)
 set(CMAKE_CXX_STANDARD 11)
 
 add_library(coap-simple coap-simple.cpp coap-simple.h)
-add_library(coap_retransmit coap_retransmit.cpp coap_retransmit.h)
 
 # includes esp-32 libraries into library search path
 include_directories(~/workspace/esp32-lib/cores/esp32)

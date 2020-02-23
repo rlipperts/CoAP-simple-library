@@ -25,6 +25,10 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "Udp.h"
 #include <cstdint>
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <cmath>
 
 #define MAX_CALLBACK 10
 
@@ -37,6 +41,11 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define RESPONSE_CODE(class, detail) ((class << 5) | (detail))
 #define COAP_OPTION_DELTA(v, n) (v < 13 ? (*n = (0xFF & v)) : (v <= 0xFF + 13 ? (*n = 13) : (*n = 14)))
+
+#define ACK_TIMEOUT_MS 2000
+#define ACK_RANDOM_FACTOR_MAX 1.5
+#define ACK_RANDOM_FACTOR_MIN 1
+#define MAX_RETRANSMIT 4
 
 typedef enum {
     COAP_CON = 0,
@@ -120,7 +129,7 @@ class CoapPacket {
 		uint8_t *payload;
 		uint8_t payloadlen;
 		uint16_t messageid;
-		
+
 		uint8_t optionnum;
 		CoapOption options[MAX_OPTION_NUM];
 
@@ -166,24 +175,34 @@ class Coap {
         callback resp;
         int _port;
 
+        IPAddress resendIP;
+        int resendPort;
+        CoapPacket pending;
+        std::thread* retransmissionThread;
+        int retransmissionAttempt;
+
         uint16_t sendPacket(CoapPacket &packet, IPAddress ip);
         uint16_t sendPacket(CoapPacket &packet, IPAddress ip, int port);
         int parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf, size_t buflen);
 
+        void timeout(int delayMs);
+        void scheduleRetransmission(const IPAddress &ip, int port, const CoapPacket &packet);
+
     public:
         Coap(
-            UDP& udp
+            UDP& udp,
+            std::thread *t
         );
         bool start();
         bool start(int port);
         void response(callback c) { resp = c; }
-        
+
         void server(callback c, String url) { uri.add(c, url); }
         uint16_t sendResponse(IPAddress ip, int port, uint16_t messageid);
         uint16_t sendResponse(IPAddress ip, int port, uint16_t messageid, char *payload);
         uint16_t sendResponse(IPAddress ip, int port, uint16_t messageid, char *payload, int payloadlen);
         uint16_t sendResponse(IPAddress ip, int port, uint16_t messageid, char *payload, int payloadlen, COAP_RESPONSE_CODE code, COAP_CONTENT_TYPE type, uint8_t *token, int tokenlen);
-        
+
         uint16_t get(IPAddress ip, int port, char *url);
         uint16_t put(IPAddress ip, int port, char *url, char *payload);
         uint16_t put(IPAddress ip, int port, char *url, char *payload, int payloadlen);
@@ -191,6 +210,7 @@ class Coap {
         uint16_t send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METHOD method, uint8_t *token, uint8_t tokenlen, uint8_t *payload, uint32_t payloadlen, COAP_CONTENT_TYPE content_type);
 
         bool loop();
+
 };
 
 #endif

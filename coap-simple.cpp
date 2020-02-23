@@ -1,10 +1,8 @@
 #include "coap-simple.h"
-#include "Arduino.h"
 
 #define LOGGING
 
-void CoapPacket::addOption(uint8_t number, uint8_t length, uint8_t *opt_payload)
-{
+void CoapPacket::addOption(uint8_t number, uint8_t length, uint8_t *opt_payload) {
     options[optionnum].number = number;
     options[optionnum].length = length;
     options[optionnum].buffer = opt_payload;
@@ -13,9 +11,11 @@ void CoapPacket::addOption(uint8_t number, uint8_t length, uint8_t *opt_payload)
 }
 
 Coap::Coap(
-    UDP& udp
+        UDP &udp,
+        std::thread *t
 ) {
     this->_udp = &udp;
+    this->retransmissionThread = t;
 }
 
 bool Coap::start() {
@@ -56,7 +56,7 @@ uint16_t Coap::sendPacket(CoapPacket &packet, IPAddress ip, int port) {
     }
 
     // make option header
-    for (int i = 0; i < packet.optionnum; i++)  {
+    for (int i = 0; i < packet.optionnum; i++) {
         uint32_t optdelta;
         uint8_t len, delta;
 
@@ -65,7 +65,7 @@ uint16_t Coap::sendPacket(CoapPacket &packet, IPAddress ip, int port) {
         }
         optdelta = packet.options[i].number - running_delta;
         COAP_OPTION_DELTA(optdelta, &delta);
-        COAP_OPTION_DELTA((uint32_t)packet.options[i].length, &len);
+        COAP_OPTION_DELTA((uint32_t) packet.options[i].length, &len);
 
         *p++ = (0xFF & (delta << 4 | len));
         if (delta == 13) {
@@ -74,14 +74,15 @@ uint16_t Coap::sendPacket(CoapPacket &packet, IPAddress ip, int port) {
         } else if (delta == 14) {
             *p++ = ((optdelta - 269) >> 8);
             *p++ = (0xFF & (optdelta - 269));
-            packetSize+=2;
-        } if (len == 13) {
+            packetSize += 2;
+        }
+        if (len == 13) {
             *p++ = (packet.options[i].length - 13);
             packetSize++;
         } else if (len == 14) {
             *p++ = (packet.options[i].length >> 8);
             *p++ = (0xFF & (packet.options[i].length - 269));
-            packetSize+=2;
+            packetSize += 2;
         }
 
         memcpy(p, packet.options[i].buffer, packet.options[i].length);
@@ -107,23 +108,29 @@ uint16_t Coap::sendPacket(CoapPacket &packet, IPAddress ip, int port) {
     return packet.messageid;
 }
 
+// client request functions
+
 uint16_t Coap::get(IPAddress ip, int port, char *url) {
     return this->send(ip, port, url, COAP_CON, COAP_GET, NULL, 0, NULL, 0);
 }
 
 uint16_t Coap::put(IPAddress ip, int port, char *url, char *payload) {
-    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *)payload, strlen(payload));
+    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *) payload, strlen(payload));
 }
 
 uint16_t Coap::put(IPAddress ip, int port, char *url, char *payload, int payloadlen) {
-    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *)payload, payloadlen);
+    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *) payload, payloadlen);
 }
 
-uint16_t Coap::send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METHOD method, uint8_t *token, uint8_t tokenlen, uint8_t *payload, uint32_t payloadlen) {
-    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *)payload, payloadlen, COAP_NONE);
+uint16_t
+Coap::send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METHOD method, uint8_t *token, uint8_t tokenlen,
+           uint8_t *payload, uint32_t payloadlen) {
+    return this->send(ip, port, url, COAP_CON, COAP_PUT, NULL, 0, (uint8_t *) payload, payloadlen, COAP_NONE);
 }
 
-uint16_t Coap::send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METHOD method, uint8_t *token, uint8_t tokenlen, uint8_t *payload, uint32_t payloadlen, COAP_CONTENT_TYPE content_type) {
+uint16_t
+Coap::send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METHOD method, uint8_t *token, uint8_t tokenlen,
+           uint8_t *payload, uint32_t payloadlen, COAP_CONTENT_TYPE content_type) {
 
     // make packet
     CoapPacket packet;
@@ -138,29 +145,42 @@ uint16_t Coap::send(IPAddress ip, int port, char *url, COAP_TYPE type, COAP_METH
     packet.messageid = rand();
 
     // use URI_HOST UIR_PATH
-    String ipaddress = String(ip[0]) + String(".") + String(ip[1]) + String(".") + String(ip[2]) + String(".") + String(ip[3]); 
-	packet.addOption(COAP_URI_HOST, ipaddress.length(), (uint8_t *)ipaddress.c_str());
+    String ipaddress =
+            String(ip[0]) + String(".") + String(ip[1]) + String(".") + String(ip[2]) + String(".") + String(ip[3]);
+    packet.addOption(COAP_URI_HOST, ipaddress.length(), (uint8_t *) ipaddress.c_str());
 
     // parse url
     int idx = 0;
     for (int i = 0; i < strlen(url); i++) {
         if (url[i] == '/') {
-			packet.addOption(COAP_URI_PATH, i-idx, (uint8_t *)(url + idx));
+            packet.addOption(COAP_URI_PATH, i - idx, (uint8_t *) (url + idx));
             idx = i + 1;
         }
     }
 
     if (idx <= strlen(url)) {
-		packet.addOption(COAP_URI_PATH, strlen(url)-idx, (uint8_t *)(url + idx));
+        packet.addOption(COAP_URI_PATH, strlen(url) - idx, (uint8_t *) (url + idx));
     }
 
-	// if Content-Format option
-	uint8_t optionBuffer[2] {0};
-	if (content_type != COAP_NONE) {
-		optionBuffer[0] = ((uint16_t)content_type & 0xFF00) >> 8;
-		optionBuffer[1] = ((uint16_t)content_type & 0x00FF) ;
-		packet.addOption(COAP_CONTENT_FORMAT, 2, optionBuffer);
-	}
+    // if Content-Format option
+    uint8_t optionBuffer[2]{0};
+    if (content_type != COAP_NONE) {
+        optionBuffer[0] = ((uint16_t) content_type & 0xFF00) >> 8;
+        optionBuffer[1] = ((uint16_t) content_type & 0x00FF);
+        packet.addOption(COAP_CONTENT_FORMAT, 2, optionBuffer);
+    }
+
+    // schedule retransmission if packet is CON
+    if (packet.type == COAP_CON) {
+        if (pending.messageid != 0) {
+            // still a pending CON, so don't send another one!
+            std::cout << "There is still a CON waiting for its ACK! Packet with id " << packet.messageid << " dropped."
+                      << std::endl;
+            return pending.messageid;
+        }
+        scheduleRetransmission(ip, port, packet);
+    }
+
 
     // send packet
     return this->sendPacket(packet, ip, port);
@@ -185,7 +205,7 @@ int Coap::parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf
         headlen += 2;
         if (buflen < headlen) return -1;
         delta = ((p[1] << 8) | p[2]) + 269;
-        p+=2;
+        p += 2;
     } else if (delta == 15) return -1;
 
     if (len == 13) {
@@ -197,13 +217,13 @@ int Coap::parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf
         headlen += 2;
         if (buflen < headlen) return -1;
         len = ((p[1] << 8) | p[2]) + 269;
-        p+=2;
+        p += 2;
     } else if (len == 15)
         return -1;
 
-    if ((p + 1 + len) > (*buf + buflen))  return -1;
+    if ((p + 1 + len) > (*buf + buflen)) return -1;
     option->number = delta + *running_delta;
-    option->buffer = p+1;
+    option->buffer = p + 1;
     option->length = len;
     *buf = p + 1 + len;
     *running_delta += delta;
@@ -211,7 +231,7 @@ int Coap::parseOption(CoapOption *option, uint16_t *running_delta, uint8_t **buf
     return 0;
 }
 
-// receiving loop that parses packets from udp component. Blocks until packet received.
+// receiving loop that parses packets from udp component.
 bool Coap::loop() {
 
     uint8_t buffer[BUF_MAX_SIZE];
@@ -235,8 +255,8 @@ bool Coap::loop() {
         packet.messageid = 0xFF00 & (buffer[2] << 8);
         packet.messageid |= 0x00FF & buffer[3];
 
-        if (packet.tokenlen == 0)  packet.token = NULL;
-        else if (packet.tokenlen <= 8)  packet.token = buffer + 4;
+        if (packet.tokenlen == 0) packet.token = NULL;
+        else if (packet.tokenlen <= 8) packet.token = buffer + 4;
         else {
             packetlen = _udp->parsePacket();
             continue;
@@ -248,30 +268,34 @@ bool Coap::loop() {
             uint16_t delta = 0;
             uint8_t *end = buffer + packetlen;
             uint8_t *p = buffer + COAP_HEADER_SIZE + packet.tokenlen;
-            while(optionIndex < MAX_OPTION_NUM && *p != 0xFF && p < end) {
+            while (optionIndex < MAX_OPTION_NUM && *p != 0xFF && p < end) {
                 packet.options[optionIndex];
-                if (0 != parseOption(&packet.options[optionIndex], &delta, &p, end-p))
+                if (0 != parseOption(&packet.options[optionIndex], &delta, &p, end - p))
                     return false;
                 optionIndex++;
             }
             packet.optionnum = optionIndex;
 
-            if (p+1 < end && *p == 0xFF) {
-                packet.payload = p+1;
-                packet.payloadlen = end-(p+1);
+            if (p + 1 < end && *p == 0xFF) {
+                packet.payload = p + 1;
+                packet.payloadlen = end - (p + 1);
             } else {
                 packet.payload = NULL;
-                packet.payloadlen= 0;
+                packet.payloadlen = 0;
             }
         }
 
         if (packet.type == COAP_ACK) {
             // call response function
-            // Todo: Here we need to remove the packet waiting for ACK
+            if (packet.messageid == pending.messageid) {// If we are waiting for an ACK of this message cancel the resend
+                std::cout << "ACK for packet with id " << packet.messageid
+                          << " received, cancelling retransmission." << std::endl;
+                pending.messageid = 0;
+                retransmissionAttempt = 0;
+            }
             resp(packet, _udp->remoteIP(), _udp->remotePort());
-
         } else {
-            
+
             String url = "";
             // call endpoint url function
             for (int i = 0; i < packet.optionnum; i++) {
@@ -279,26 +303,26 @@ bool Coap::loop() {
                     char urlname[packet.options[i].length + 1];
                     memcpy(urlname, packet.options[i].buffer, packet.options[i].length);
                     urlname[packet.options[i].length] = NULL;
-                    if(url.length() > 0)
-                      url += "/";
+                    if (url.length() > 0)
+                        url += "/";
                     url += urlname;
                 }
-            }        
+            }
 
             if (!uri.find(url)) {
                 sendResponse(_udp->remoteIP(), _udp->remotePort(), packet.messageid, NULL, 0,
-                        COAP_NOT_FOUNT, COAP_NONE, NULL, 0);
+                             COAP_NOT_FOUNT, COAP_NONE, NULL, 0);
             } else {
                 uri.find(url)(packet, _udp->remoteIP(), _udp->remotePort());
             }
         }
 
-        /* this type check did not use. BECAUSE THIS IS ONLY A CLIENT
-        if (packet.type == COAP_CON) {
-            // send response 
-             sendResponse(_udp->remoteIP(), _udp->remotePort(), packet.messageid);
-        }
-         */
+        // send response for confirmable packets
+//        if (packet.type == COAP_CON) {
+//            // send response
+//            sendResponse(_udp->remoteIP(), _udp->remotePort(), packet.messageid);
+//        }
+
 
         // next packet
         packetlen = _udp->parsePacket();
@@ -306,6 +330,8 @@ bool Coap::loop() {
 
     return true;
 }
+
+// Server response functions
 
 uint16_t Coap::sendResponse(IPAddress ip, int port, uint16_t messageid) {
     this->sendResponse(ip, port, messageid, NULL, 0, COAP_CONTENT, COAP_TEXT_PLAIN, NULL, 0);
@@ -321,7 +347,7 @@ uint16_t Coap::sendResponse(IPAddress ip, int port, uint16_t messageid, char *pa
 
 
 uint16_t Coap::sendResponse(IPAddress ip, int port, uint16_t messageid, char *payload, int payloadlen,
-                COAP_RESPONSE_CODE code, COAP_CONTENT_TYPE type, uint8_t *token, int tokenlen) {
+                            COAP_RESPONSE_CODE code, COAP_CONTENT_TYPE type, uint8_t *token, int tokenlen) {
     // make packet
     CoapPacket packet;
 
@@ -329,16 +355,58 @@ uint16_t Coap::sendResponse(IPAddress ip, int port, uint16_t messageid, char *pa
     packet.code = code;
     packet.token = token;
     packet.tokenlen = tokenlen;
-    packet.payload = (uint8_t *)payload;
+    packet.payload = (uint8_t *) payload;
     packet.payloadlen = payloadlen;
     packet.optionnum = 0;
     packet.messageid = messageid;
 
     // if more options?
     uint8_t optionBuffer[2] = {0};
-    optionBuffer[0] = ((uint16_t)type & 0xFF00) >> 8;
-    optionBuffer[1] = ((uint16_t)type & 0x00FF) ;
-	packet.addOption(COAP_CONTENT_FORMAT, 2, optionBuffer);
+    optionBuffer[0] = ((uint16_t) type & 0xFF00) >> 8;
+    optionBuffer[1] = ((uint16_t) type & 0x00FF);
+    packet.addOption(COAP_CONTENT_FORMAT, 2, optionBuffer);
 
     return this->sendPacket(packet, ip, port);
+}
+
+
+
+//--------------------------------------------------------------------------------------------------------------------//
+//                    Additional functions                                                                            //
+//--------------------------------------------------------------------------------------------------------------------//
+
+// waits until timeout passed before executing - call it from a thread!
+void Coap::timeout(int delayMs) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+    if (pending.messageid == 0) {
+        std::cout << "Retransmission cancelled!" << std::endl;
+    } else {
+        this->sendPacket(pending, resendIP, resendPort);
+        std::cout << "Retransmitting - packet id: " << pending.messageid << std::endl;
+        scheduleRetransmission(resendIP, resendPort, pending);
+    }
+}
+
+// schedules the packet retransmission utilizing a binary exponential backoff
+void Coap::scheduleRetransmission(const IPAddress &ip, int port, const CoapPacket &packet) {
+    pending = packet;
+    resendIP = ip;
+    resendPort = port;
+    retransmissionAttempt++;
+
+    if (retransmissionAttempt > MAX_RETRANSMIT) {
+        std::cout << "Maximum retransmission attempts reached! Packet with id "
+                  << pending.messageid << " dropped." << std::endl;
+        retransmissionAttempt = 0;
+        pending.messageid = 0;
+        return;
+    }
+
+    float ackRandomFactor = ACK_RANDOM_FACTOR_MIN + static_cast <float> (rand()) /
+                                                    ( static_cast <float> (RAND_MAX/(ACK_RANDOM_FACTOR_MAX-1)));
+    int backoff = ACK_TIMEOUT_MS * (pow(2, retransmissionAttempt) - 1) * ackRandomFactor;
+
+    retransmissionThread = new std::thread(&Coap::timeout, this, backoff);
+    std::cout << "Scheduled retransmission with backoff time " << backoff << "ms for retransmission attempt "
+              << retransmissionAttempt << std::endl;
 }
